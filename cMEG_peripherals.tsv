@@ -1,0 +1,17 @@
+# Cerca OPM-MEG peripherals: define every BNC channel in use (Scully Center, PNI)
+# type: button (stim + bit in STI_BTN, in listed order: 1, 2, 4, ...),
+#       stim, misc, drop.  BNC channels not listed are kept as misc.
+channel	type	name
+BNC 1	button	R_thumb
+BNC 2	button	R_index
+BNC 3	button	R_middle
+BNC 4	button	R_ring
+BNC 5	button	R_pinky
+BNC 6	button	L_thumb
+BNC 7	button	L_index
+BNC 8	button	L_middle
+BNC 9	button	L_ring
+BNC 10	button	L_pinky
+BNC 11	misc	eye_x
+BNC 12	misc	eye_y
+BNC 13	misc	eye_z
