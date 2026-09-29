@@ -166,6 +166,9 @@ Output
     --out FILE          output FIF (default <prefix>_meg.fif); the log is
                         written next to it as <stem>_conversion_log.txt
     --force             overwrite an existing FIF, its split parts and log
+    --double            store data as float64 instead of float32 (twice the
+                        file size; float32 rounding, ~6e-8 of each value, is
+                        far below OPM sensor noise)
 Processing
     --line-freq HZ      mains frequency (default 60; JSON value is ignored)
     --min-samples N     shortest code kept in STI101/STI_BTN, in samples
@@ -214,6 +217,9 @@ Digitisation
     longer passed to the montage (they live in info['chs']).
   - Deprecated pandas delim_whitespace replaced; only x y z columns read.
 Usability
+  - --double stores float64 data (default float32). MEG channels are stored
+    in tesla with cal = 1 (v2.1 stored volts with cal = 1e-9/gain, and FIF
+    keeps cal as float32, which added rounding even to double output).
   - Outputs are not overwritten without --force; screen output is saved to
     a conversion log with a provenance header.
   - Script file is cMEG2fif.py (no version in the name); the version is
@@ -235,7 +241,7 @@ import re
 import sys
 import warnings
 
-__version__ = '2.8'
+__version__ = '2.9'
 
 
 class _Tee:
@@ -521,6 +527,9 @@ def main():
                         'next to it')
     g.add_argument('--force', action='store_true',
                    help='overwrite an existing FIF, its split parts and log')
+    g.add_argument('--double', action='store_true',
+                   help='store data as float64 instead of float32 '
+                        '(twice the file size)')
     g = ap.add_argument_group('processing')
     g.add_argument('--line-freq', metavar='HZ', type=float, default=60.0,
                    help='mains frequency (default 60; JSON value ignored)')
@@ -543,6 +552,8 @@ def main():
     print(f'  Versions: Python {platform.python_version()}, '
           f'MNE {mne.__version__}, NumPy {np.__version__}, '
           f'pandas {pd.__version__}')
+    print(f'  Output:   ' + ('double precision (float64)' if args.double
+                             else 'single precision (float32, default)'))
     print()
 
     prefix, parts = find_parts(args.cmeg)
@@ -778,13 +789,13 @@ def main():
                       kind=FIFF.FIFFV_MEG_CH, unit=FIFF.FIFF_UNIT_T,
                       coil_type=FIFF.FIFFV_COIL_QUSPIN_ZFOPM_MAG2,
                       loc=np.concatenate([pos[i], ex, ey, ez]),
-                      cal=1e-9 / gain[i])
+                      cal=1.0)   # data already in T
         elif ct == 'ref_meg':
             nref += 1
             ch.update(logno=nref, coord_frame=FIFF.FIFFV_COORD_UNKNOWN,
                       kind=FIFF.FIFFV_REF_MEG_CH, unit=FIFF.FIFF_UNIT_T,
                       coil_type=FIFF.FIFFV_COIL_QUSPIN_ZFOPM_MAG2,
-                      cal=1e-9 / gain[i])
+                      cal=1.0)   # data already in T
         elif ct == 'stim':
             nstim += 1
             ch.update(logno=nstim, coord_frame=FIFF.FIFFV_COORD_UNKNOWN,
@@ -872,7 +883,8 @@ def main():
             print(f'  Marked bad from channels.tsv: {bads}')
 
     print(f'Saving {out_path}')
-    written = raw.save(out_path, overwrite=args.force)  # splits at 2 GB
+    written = raw.save(out_path, overwrite=args.force,        # splits at 2 GB
+                       fmt='double' if args.double else 'single')
     written = [os.path.abspath(str(f)) for f in (written or [out_path])]
     stale = [f for f in old_splits if os.path.abspath(f) not in written]
     for f in stale:
