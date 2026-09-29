@@ -156,7 +156,8 @@ Inputs
     --xfm FILE          4x4 device->digitisation transform, e.g. the Cerca
                         headHelmet *_dev2head_xfm.tsv
                         (default <prefix>_SensorTransform.tsv; used only
-                        with digitisation)
+                        with digitisation; leave out for empty-room
+                        recordings)
     --dig FILE          digitisation .xyz; last 3 rows NAS, LPA, RPA
                         (default <prefix>_digitisation.xyz; optional; leave
                         out for empty-room recordings)
@@ -173,8 +174,11 @@ Processing
     --line-freq HZ      mains frequency (default 60; JSON value is ignored)
     --min-samples N     shortest code kept in STI101/STI_BTN, in samples
                         (default 3)
-    --max-hsp N         randomly keep at most N head-shape points
-                        (default 0 = keep all)
+    --max-hsp N         keep a random subset of at most N head-shape points
+                        (fixed seed, so the same points every run; NAS/LPA/
+                        RPA always kept; default 0 = keep all). Useful for
+                        dense mesh-derived head shapes (~50k points), which
+                        slow plotting and MRI coregistration.
 Display
     --no-plot           skip the 3D sensor/head alignment plot (shown only
                         when digitisation is used)
@@ -217,6 +221,7 @@ Digitisation
     longer passed to the montage (they live in info['chs']).
   - Deprecated pandas delim_whitespace replaced; only x y z columns read.
 Usability
+  - --xfm without digitisation now warns instead of being silently ignored.
   - --double stores float64 data (default float32). MEG channels are stored
     in tesla with cal = 1 (v2.1 stored volts with cal = 1e-9/gain, and FIF
     keeps cal as float32, which added rounding even to double output).
@@ -241,7 +246,7 @@ import re
 import sys
 import warnings
 
-__version__ = '2.9'
+__version__ = '2.10'
 
 
 class _Tee:
@@ -514,7 +519,7 @@ def main():
     g.add_argument('--xfm', metavar='FILE',
                    help='4x4 device->digitisation transform (default '
                         '<prefix>_SensorTransform.tsv; used only with '
-                        'digitisation)')
+                        '--dig; omit for empty room)')
     g.add_argument('--dig', metavar='FILE',
                    help='digitisation .xyz, last 3 rows NAS/LPA/RPA (default '
                         '<prefix>_digitisation.xyz; omit for empty room)')
@@ -536,8 +541,9 @@ def main():
     g.add_argument('--min-samples', metavar='N', type=int, default=3,
                    help='shortest code kept in STI101/STI_BTN (default 3)')
     g.add_argument('--max-hsp', metavar='N', type=int, default=0,
-                   help='randomly keep at most N head-shape points '
-                        '(default 0 = all)')
+                   help='keep a random subset of at most N head-shape points '
+                        '(fixed seed, so the same points every run; '
+                        'fiducials always kept; default 0 = all)')
     g = ap.add_argument_group('display')
     g.add_argument('--no-plot', action='store_true',
                    help='skip the 3D sensor/head alignment plot')
@@ -581,6 +587,10 @@ def main():
     if args.dig and not os.path.isfile(args.dig):
         sys.exit(f'--dig file not found: {args.dig}')
     use_dig = os.path.isfile(dig_path)
+    if args.xfm and not use_dig:
+        warnings.warn(f'--xfm given but no digitisation found ({dig_path}); '
+                      f'the transform is ignored. Add --dig, or leave out '
+                      f'--xfm for empty-room recordings.')
     _require([json_path, chan_path, helm_path]
              + ([xfm_path] if use_dig else []))
 
