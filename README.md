@@ -2,7 +2,7 @@
 
 Convert Cerca Magnetics / QuSpin OPM-MEG recordings (`.cMEG`) to MNE-Python FIF files, with sensor geometry, head coregistration, decoded trigger and button channels, and a provenance log for every conversion.
 
-Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
+Developed for the OPM-MEG facility at the Scully Center for the Neuroscience of Mind & Behavior, Princeton Neuroscience Institute. Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
 
 ## What it does
 
@@ -49,7 +49,7 @@ For subject recordings with head coregistration you also need these files:
 | Device-to-head transform, e.g. `subject003_headHelmet_dev2head_xfm.tsv` | `--xfm` |
 | Head-shape points, e.g. `subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz` (last three rows: nasion, LPA, RPA) | `--dig` |
 
-The unnumbered `<prefix>_meg.cMEG` is never used, because it may be a cData edited copy rather than the original.
+The unnumbered `<prefix>_meg.cMEG` is never used, because it may be an edited copy rather than the original.
 
 ## Usage
 
@@ -62,14 +62,12 @@ python cMEG2fif.py 20260924_103257_meg_001.cMEG
 :: Subject recording with head coregistration
 python cMEG2fif.py 20260924_113141_meg_001.cMEG ^
     --xfm subject003_headHelmet_dev2head_xfm.tsv ^
-    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz ^
-    --peripherals cMEG_peripherals.tsv
+    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz
 
 :: Re-convert, replacing earlier output, without the 3D plot
 python cMEG2fif.py 20260924_113141_meg_001.cMEG ^
     --xfm subject003_headHelmet_dev2head_xfm.tsv ^
     --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz ^
-    --peripherals cMEG_peripherals.tsv ^
     --force --no-plot
 ```
 
@@ -80,7 +78,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 | Option | Default | Description |
 |---|---|---|
 | `CMEG_FILE` | *required* | Any part of the recording (`<prefix>_meg_NNN.cMEG`) |
-| `--xfm FILE` | `<prefix>_SensorTransform.tsv` | 4×4 device→digitisation transform; used only with digitisation |
+| `--xfm FILE` | `<prefix>_SensorTransform.tsv` | 4×4 device→digitisation transform; used only with `--dig`. Omit for empty room. |
 | `--dig FILE` | `<prefix>_digitisation.xyz` | Head-shape points; last 3 rows NAS, LPA, RPA. Omit for empty room. |
 | `--peripherals FILE` | `cMEG_peripherals.tsv` in the data folder, else next to the script | BNC peripherals definition |
 | `--out FILE` | `<prefix>_meg.fif` | Output FIF; the log is written next to it |
@@ -88,7 +86,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 | `--double` | off (float32) | Store data as float64. Doubles file size; float32 rounding (~6×10⁻⁸ of each value) is far below OPM sensor noise, so use this only for bit-exact archiving or pipeline comparisons ([details](#how-the-meg-values-are-stored)). |
 | `--line-freq HZ` | `60` | Mains frequency (the JSON value is ignored; Cerca writes 0) |
 | `--min-samples N` | `3` | Shortest code kept in `STI101`/`STI_BTN`, in samples |
-| `--max-hsp N` | `0` (all) | Randomly keep at most N head-shape points |
+| `--max-hsp N` | `0` (all) | Keep a random subset of at most N head-shape points. Uses a fixed seed (same points every run) and always keeps the fiducials. Useful for dense mesh-derived head shapes (~50k points), which slow plotting and MRI coregistration. |
 | `--no-plot` | off | Skip the 3D sensor/head alignment plot |
 | `--version` | | Show the script version and exit |
 
@@ -98,7 +96,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 - **`<prefix>_meg_conversion_log.txt`**: everything printed during conversion, beginning with a provenance header like this:
 
   ```
-  cMEG2fif version 2.9
+  cMEG2fif version 2.10
     Run:      2026-09-28 16:23:13 EDT
     Command:  cMEG2fif.py 20260924_113141_meg_001.cMEG --xfm ... --dig ...
     Script:   C:\...\cMEG2fif.py
