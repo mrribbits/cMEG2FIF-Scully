@@ -2,7 +2,7 @@
 
 Convert Cerca Magnetics / QuSpin OPM-MEG recordings (`.cMEG`) to MNE-Python FIF files, with sensor geometry, head coregistration, decoded trigger and button channels, and a provenance log for every conversion.
 
-Original script modified for users at the Scully Center, Princeton Neuroscience Institute. Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
+Developed for the OPM-MEG facility at the Scully Center for the Neuroscience of Mind & Behavior, Princeton Neuroscience Institute. Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
 
 ## What it does
 
@@ -49,7 +49,7 @@ For subject recordings with head coregistration you also need these files:
 | Device-to-head transform, e.g. `subject003_headHelmet_dev2head_xfm.tsv` | `--xfm` |
 | Head-shape points, e.g. `subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz` (last three rows: nasion, LPA, RPA) | `--dig` |
 
-The unnumbered `<prefix>_meg.cMEG` is never used, because it may be a cMEG edited copy rather than the original.
+The unnumbered `<prefix>_meg.cMEG` is never used, because it may be an edited copy rather than the original.
 
 ## Usage
 
@@ -83,6 +83,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 | `--peripherals FILE` | `cMEG_peripherals.tsv` in the data folder, else next to the script | BNC peripherals definition |
 | `--out FILE` | `<prefix>_meg.fif` | Output FIF; the log is written next to it |
 | `--force` | off | Overwrite an existing FIF, its split parts and its log |
+| `--double` | off (float32) | Store data as float64. Doubles file size; float32 rounding (~6×10⁻⁸ of each value) is far below OPM sensor noise, so use this only for bit-exact archiving or pipeline comparisons ([details](#how-the-meg-values-are-stored)). |
 | `--line-freq HZ` | `60` | Mains frequency (the JSON value is ignored; Cerca writes 0) |
 | `--min-samples N` | `3` | Shortest code kept in `STI101`/`STI_BTN`, in samples |
 | `--max-hsp N` | `0` (all) | Randomly keep at most N head-shape points |
@@ -95,12 +96,13 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 - **`<prefix>_meg_conversion_log.txt`**: everything printed during conversion, beginning with a provenance header like this:
 
   ```
-  cMEG2fif version 2.8
+  cMEG2fif version 2.9
     Run:      2026-09-28 16:23:13 EDT
     Command:  cMEG2fif.py 20260924_113141_meg_001.cMEG --xfm ... --dig ...
     Script:   C:\...\cMEG2fif.py
     Host:     <computer> (Windows-...)
     Versions: Python 3.x, MNE 1.x, NumPy 2.x, pandas 2.x
+    Output:   single precision (float32, default)
   ```
 
   The log also records the input parts, the peripherals file used, detected trigger and button levels, the channel summary, the recording comment, bad channels and the files written.
@@ -236,10 +238,36 @@ mne.viz.plot_events(events, raw.info['sfreq'], first_samp=raw.first_samp)
 raw.plot(events=events)
 ```
 
+## How the MEG values are stored
+
+This section only matters if you inspect the FIF at a low level or compare it with other converters. In MNE, `raw.get_data()` returns MEG channels in tesla either way.
+
+**From voltage to field.** Each OPM axis outputs a voltage proportional to the magnetic field, and Cerca records that voltage. The gain in `channels.tsv` (2.7 V/nT at the standard setting) converts it:
+
+```
+field (T) = voltage (V) × 1e-9 / gain (V/nT)
+```
+
+**What "cal" is.** A FIF file stores each channel as a series of numbers plus a per-channel calibration factor, `cal`. When MNE loads the file, it multiplies the stored numbers by `cal` to get physical units. You can see it as `raw.info['chs'][i]['cal']`.
+
+**The two ways to store the same data:**
+
+| | Numbers stored in the file | `cal` | What MNE gives you |
+|---|---|---|---|
+| Original script (v2.1) | voltage (V) | 1e-9 / gain ≈ 3.7e-10 | tesla |
+| This script (v2.9+) | field (T) | 1 | tesla |
+
+**Why this script uses `cal = 1`.** The FIF format always saves `cal` in single precision, even when the data are saved in double precision. A `cal` like 3.7e-10 is therefore slightly rounded (by about 3 parts in 100 million), and that rounding is applied to every sample when the file is loaded. That defeats the purpose of `--double`. A `cal` of exactly 1 has no rounding, so `--double` output matches the original recording exactly.
+
+In practice:
+- For analysis there is no difference. The effect is far below sensor noise, and MNE's loaded values are the same either way.
+- To recover the original recorded voltage of an MEG channel, multiply the tesla value by `1e9 × gain` (e.g. × 2.7e9).
+- Trigger and BNC channels are stored as recorded, in volts, also with `cal = 1`. `STI101` and `STI_BTN` hold integer event codes.
+
 ## Notes
 
-- **Units:** helmet positions and digitisation must be in meters. The script warns if values look like millimeters.
-- **Gain:** the `channels.tsv` gain column (`V0x2FnT` in current Cerca exports) is in V/nT. Field (T) = voltage × 1e-9 / gain.
+- **Units:** helmet positions and digitisation must be in metres. The script warns if values look like millimetres.
+- **Gain:** the `channels.tsv` gain column (`V0x2FnT` in current Cerca exports) is in V/nT; see [How the MEG values are stored](#how-the-meg-values-are-stored).
 - **Coil type:** OPM sensors use MNE's `QUSPIN_ZFOPM_MAG2` coil definition.
 - **Line frequency:** this defaults to 60 Hz for North American sites; use `--line-freq 50` elsewhere.
 - **Empty room:** empty-room recordings should be converted without `--xfm`/`--dig`, so they carry no head transform.
