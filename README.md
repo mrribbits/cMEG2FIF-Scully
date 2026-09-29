@@ -62,12 +62,14 @@ python cMEG2fif.py 20260924_103257_meg_001.cMEG
 :: Subject recording with head coregistration
 python cMEG2fif.py 20260924_113141_meg_001.cMEG ^
     --xfm subject003_headHelmet_dev2head_xfm.tsv ^
-    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz
+    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz ^
+    --peripherals cMEG_peripherals.tsv
 
 :: Re-convert, replacing earlier output, without the 3D plot
 python cMEG2fif.py 20260924_113141_meg_001.cMEG ^
     --xfm subject003_headHelmet_dev2head_xfm.tsv ^
     --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz ^
+    --peripherals cMEG_peripherals.tsv ^
     --force --no-plot
 ```
 
