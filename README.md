@@ -238,7 +238,7 @@ raw.plot(events=events)
 
 ## Notes
 
-- **Units:** helmet positions and digitisation must be in metres. The script warns if values look like millimetres.
+- **Units:** helmet positions and digitisation must be in meters. The script warns if values look like millimeters.
 - **Gain:** the `channels.tsv` gain column (`V0x2FnT` in current Cerca exports) is in V/nT. Field (T) = voltage × 1e-9 / gain.
 - **Coil type:** OPM sensors use MNE's `QUSPIN_ZFOPM_MAG2` coil definition.
 - **Line frequency:** this defaults to 60 Hz for North American sites; use `--line-freq 50` elsewhere.
