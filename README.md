@@ -2,7 +2,7 @@
 
 Convert Cerca Magnetics / QuSpin OPM-MEG recordings (`.cMEG`) to MNE-Python FIF files, with sensor geometry, head coregistration, decoded trigger and button channels, and a provenance log for every conversion.
 
-Developed for the OPM-MEG facility at the Scully Center for the Neuroscience of Mind & Behavior, Princeton Neuroscience Institute. Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
+Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
 
 ## What it does
 
@@ -49,7 +49,7 @@ For subject recordings with head coregistration you also need these files:
 | Device-to-head transform, e.g. `subject003_headHelmet_dev2head_xfm.tsv` | `--xfm` |
 | Head-shape points, e.g. `subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz` (last three rows: nasion, LPA, RPA) | `--dig` |
 
-The unnumbered `<prefix>_meg.cMEG` is never used, because it may be an edited copy rather than the original.
+The unnumbered `<prefix>_meg.cMEG` is never used, because it may be a cData edited copy rather than the original.
 
 ## Usage
 
