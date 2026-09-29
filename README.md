@@ -2,7 +2,7 @@
 
 Convert Cerca Magnetics / QuSpin OPM-MEG recordings (`.cMEG`) to MNE-Python FIF files, with sensor geometry, head coregistration, decoded trigger and button channels, and a provenance log for every conversion.
 
-Developed for the OPM-MEG facility at the Scully Center for the Neuroscience of Mind & Behavior, Princeton Neuroscience Institute. Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
+Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
 
 ## What it does
 
