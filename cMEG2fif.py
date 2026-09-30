@@ -162,7 +162,8 @@ Inputs
                         (default <prefix>_digitisation.xyz; optional; leave
                         out for empty-room recordings)
     --peripherals FILE  BNC peripherals file (default cMEG_peripherals.tsv in
-                        the data folder, else next to this script)
+                        the data folder, else next to this script, else the
+                        copy installed with the package)
 Output
     --out FILE          output FIF (default <prefix>_meg.fif); the log is
                         written next to it as <stem>_conversion_log.txt
@@ -246,7 +247,7 @@ import re
 import sys
 import warnings
 
-__version__ = '2.10'
+__version__ = '2.11'
 
 
 class _Tee:
@@ -525,7 +526,8 @@ def main():
                         '<prefix>_digitisation.xyz; omit for empty room)')
     g.add_argument('--peripherals', metavar='FILE',
                    help=f'BNC peripherals file (default {MAP_NAME} in the '
-                        f'data folder, else next to this script)')
+                        f'data folder, else next to this script, else the '
+                        f'copy installed with the package)')
     g = ap.add_argument_group('output')
     g.add_argument('--out', metavar='FILE',
                    help='output FIF (default <prefix>_meg.fif); log goes '
@@ -631,7 +633,9 @@ def main():
     if map_path is None:
         for cand in (os.path.join(os.path.dirname(prefix), MAP_NAME),
                      os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                  MAP_NAME)):
+                                  MAP_NAME),
+                     # copy installed by pip (see pyproject.toml)
+                     os.path.join(sys.prefix, 'share', 'cmeg2fif', MAP_NAME)):
             if os.path.isfile(cand):
                 map_path = cand
                 break

@@ -20,8 +20,44 @@ Based on the original `cMEG2fif` script by Molly Rea (v2.1, 2023).
 |---|---|
 | `cMEG2fif.py` | The converter. Full documentation is also at the top of the script. Check the version with `python cMEG2fif.py --version`. |
 | `cMEG_peripherals.tsv` | Defines what is plugged into each BNC input (buttons, eye tracker, …). |
+| `pyproject.toml` | Lets the converter be installed with `pip` (see below). |
 
-## Requirements
+## Installation
+
+There are two ways to use the converter.
+
+### Option 1: install with pip (recommended for pipelines)
+
+Install it into your Python or conda environment straight from GitHub:
+
+```
+pip install "git+https://github.com/mrribbits/cMEG2FIF-Scully.git"
+```
+
+This installs `numpy`, `pandas` and `mne` if they're missing, and adds a `cmeg2fif` command that takes the same options as `python cMEG2fif.py`:
+
+```
+cmeg2fif --version
+cmeg2fif 20260924_103257_meg_001.cMEG --no-plot
+```
+
+To also install the packages for the 3D alignment plot, add `[plot]`:
+
+```
+pip install "cmeg2fif[plot] @ git+https://github.com/mrribbits/cMEG2FIF-Scully.git"
+```
+
+For reproducible installs (for example in a shared pipeline), install a fixed version by adding a commit ID or tag after `@`:
+
+```
+pip install "git+https://github.com/mrribbits/cMEG2FIF-Scully.git@<commit-or-tag>"
+```
+
+The install also includes a copy of `cMEG_peripherals.tsv`, used when `--peripherals` isn't given and the data folder has none. To use a different map, pass `--peripherals`.
+
+### Option 2: run the script directly
+
+Download `cMEG2fif.py` (and `cMEG_peripherals.tsv`) and run it with Python. Install the requirements first:
 
 ```
 pip install numpy pandas mne pyvista pyvistaqt pyqt6
@@ -80,7 +116,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 | `CMEG_FILE` | *required* | Any part of the recording (`<prefix>_meg_NNN.cMEG`) |
 | `--xfm FILE` | `<prefix>_SensorTransform.tsv` | 4×4 device→digitisation transform; used only with `--dig`. Omit for empty room. |
 | `--dig FILE` | `<prefix>_digitisation.xyz` | Head-shape points; last 3 rows NAS, LPA, RPA. Omit for empty room. |
-| `--peripherals FILE` | `cMEG_peripherals.tsv` in the data folder, else next to the script | BNC peripherals definition |
+| `--peripherals FILE` | `cMEG_peripherals.tsv` in the data folder, else next to the script, else the copy installed with pip | BNC peripherals definition |
 | `--out FILE` | `<prefix>_meg.fif` | Output FIF; the log is written next to it |
 | `--force` | off | Overwrite an existing FIF, its split parts and its log |
 | `--double` | off (float32) | Store data as float64. Doubles file size; float32 rounding (~6×10⁻⁸ of each value) is far below OPM sensor noise, so use this only for bit-exact archiving or pipeline comparisons ([details](#how-the-meg-values-are-stored)). |

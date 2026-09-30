@@ -1,0 +1,48 @@
+# Packaging for cMEG2fif, so it can be installed with pip:
+#
+#   pip install git+https://github.com/mrribbits/cMEG2FIF-Scully.git@<commit>
+#
+# This installs a `cmeg2fif` command (same options as `python cMEG2fif.py`)
+# and a copy of cMEG_peripherals.tsv under <env>/share/cmeg2fif/, used as the
+# default peripherals file when --peripherals isn't given and the data folder
+# has none. Running `python cMEG2fif.py ...` straight from the repo still works.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cmeg2fif"
+dynamic = ["version"]  # read from __version__ in cMEG2fif.py
+description = "Convert Cerca/QuSpin OPM-MEG .cMEG recordings to MNE-Python FIF files"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Molly Rea" },
+    { name = "Mark Pinsk" },
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "mne",
+]
+
+[project.optional-dependencies]
+# Only needed for the 3D sensor/head alignment plot (skip with --no-plot).
+plot = ["pyvista", "pyvistaqt", "pyqt6"]
+
+[project.urls]
+Repository = "https://github.com/mrribbits/cMEG2FIF-Scully"
+
+[project.scripts]
+cmeg2fif = "cMEG2fif:main"
+
+[tool.setuptools]
+py-modules = ["cMEG2fif"]
+
+[tool.setuptools.dynamic]
+version = { attr = "cMEG2fif.__version__" }
+
+# Installed to <env>/share/cmeg2fif/cMEG_peripherals.tsv
+[tool.setuptools.data-files]
+"share/cmeg2fif" = ["cMEG_peripherals.tsv"]
