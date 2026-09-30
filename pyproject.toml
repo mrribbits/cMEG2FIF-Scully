@@ -25,6 +25,7 @@ dependencies = [
     "numpy",
     "pandas",
     "mne",
+    "tzdata",  # time-zone database for --timezone (needed on Windows)
 ]
 
 [project.optional-dependencies]

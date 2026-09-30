@@ -66,6 +66,15 @@ Output
 recordings are split by MNE into <prefix>_meg.fif, <prefix>_meg-1.fif, ...
 Reading the first file with mne.io.read_raw_fif loads all of them.
 
+Recording date
+--------------
+Cerca stores no date inside the recording; the file-name prefix
+(YYYYMMDD_HHMMSS) is when the recording started, in local time on the
+acquisition PC. It is converted to UTC with --timezone (daylight saving is
+handled) and stored as the FIF's meas_date, which MNE-BIDS uses for
+scans.tsv acq_time and for anonymisation. A prefix that isn't a timestamp
+leaves meas_date unset, with a warning.
+
 Trigger, button and auxiliary channels
 --------------------------------------
 Trigger 1-8 (VPixx Pixel Mode lines) stay as individual stim channels and
@@ -173,6 +182,9 @@ Output
                         far below OPM sensor noise)
 Processing
     --line-freq HZ      mains frequency (default 60; JSON value is ignored)
+    --timezone TZ       time zone of the acquisition PC clock, used to turn
+                        the file-name timestamp into the recording date
+                        (IANA name; default America/New_York)
     --min-samples N     shortest code kept in STI101/STI_BTN, in samples
                         (default 3)
     --max-hsp N         keep a random subset of at most N head-shape points
@@ -214,6 +226,7 @@ Channels and sensors
 Metadata
   - line_freq defaults to 60 Hz (Cerca writes PowerLineFrequency as 0).
   - TaskDescription -> info['description'].
+  - meas_date set from the file-name timestamp, using --timezone (v2.12).
   - Checks: data channels vs channels.tsv rows, JSON sampling rate vs time
     vector, JSON RecordingDuration vs samples read, mm-vs-m units.
 Digitisation
@@ -246,8 +259,9 @@ import platform
 import re
 import sys
 import warnings
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-__version__ = '2.11'
+__version__ = '2.12'
 
 
 class _Tee:
@@ -305,6 +319,8 @@ GAIN_COLS = ['V0x2FnT', 'V/nT', 'nT/V', 'nT0x2FV']
 GEOM_COLS = ['Px', 'Py', 'Pz', 'Ox', 'Oy', 'Oz']
 MAP_NAME = 'cMEG_peripherals.tsv'
 MIN_SWING = 0.5     # V; smaller swings mean the line is unused
+PREFIX_TIME_RE = re.compile(r'^(\d{8}_\d{6})$')  # Cerca: YYYYMMDD_HHMMSS
+DEFAULT_TZ = 'America/New_York'   # Scully Center acquisition PC
 
 
 # --------------------------------------------------------------------------
@@ -490,6 +506,30 @@ def combine_bits(lines, labels, n_samp, min_len):
     return code
 
 
+def start_time_from_prefix(prefix, tz_name):
+    """Recording start from the Cerca file-name prefix.
+
+    Cerca names each recording after the moment it started, as local time on
+    the acquisition PC (YYYYMMDD_HHMMSS). Returns (start in UTC, start in
+    local time), or (None, None) if the prefix isn't such a timestamp.
+    """
+    m = PREFIX_TIME_RE.match(os.path.basename(prefix))
+    if not m:
+        return None, None
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        sys.exit(f'--timezone: unknown time zone "{tz_name}". Use an IANA '
+                 f'name such as America/New_York (on Windows, also run '
+                 f'"pip install tzdata").')
+    try:
+        naive = datetime.datetime.strptime(m.group(1), '%Y%m%d_%H%M%S')
+    except ValueError:
+        return None, None
+    local = naive.replace(tzinfo=tz)
+    return local.astimezone(datetime.timezone.utc), local
+
+
 def _require(paths):
     missing = [p for p in paths if not os.path.isfile(p)]
     if missing:
@@ -540,6 +580,10 @@ def main():
     g = ap.add_argument_group('processing')
     g.add_argument('--line-freq', metavar='HZ', type=float, default=60.0,
                    help='mains frequency (default 60; JSON value ignored)')
+    g.add_argument('--timezone', metavar='TZ', default=DEFAULT_TZ,
+                   help='time zone of the acquisition PC clock, used to turn '
+                        'the file-name timestamp into the recording date '
+                        f'(IANA name; default {DEFAULT_TZ})')
     g.add_argument('--min-samples', metavar='N', type=int, default=3,
                    help='shortest code kept in STI101/STI_BTN (default 3)')
     g.add_argument('--max-hsp', metavar='N', type=int, default=0,
@@ -586,6 +630,15 @@ def main():
     _Tee.open(log_path)
     print(f'Log: {log_path}')
     print(f'Input parts: {", ".join(os.path.basename(p) for p in parts)}')
+    meas_utc, meas_local = start_time_from_prefix(prefix, args.timezone)
+    if meas_utc is not None:
+        print(f'Recording start (from the file name, {args.timezone}): '
+              f'{meas_local:%Y-%m-%d %H:%M:%S %Z} = '
+              f'{meas_utc:%Y-%m-%d %H:%M:%S} UTC')
+    else:
+        warnings.warn(f'File-name prefix "{os.path.basename(prefix)}" is not '
+                      f'a YYYYMMDD_HHMMSS timestamp; the FIF gets no '
+                      f'recording date (meas_date).')
     if args.dig and not os.path.isfile(args.dig):
         sys.exit(f'--dig file not found: {args.dig}')
     use_dig = os.path.isfile(dig_path)
@@ -883,6 +936,9 @@ def main():
     print('Creating raw object')
     raw = mne.io.RawArray(data, info, copy='auto')
     del buf, data, t
+    if meas_utc is not None:
+        raw.set_meas_date(meas_utc)
+        print(f'  Recording date (meas_date): {meas_utc:%Y-%m-%d %H:%M:%S} UTC')
     dropped = [names[i] for i in range(n_ch) if role[i] == 'drop']
     if dropped:
         raw.drop_channels(dropped)

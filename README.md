@@ -34,7 +34,7 @@ Install it into your Python or conda environment straight from GitHub:
 pip install "git+https://github.com/mrribbits/cMEG2FIF-Scully.git"
 ```
 
-This installs `numpy`, `pandas` and `mne` if they're missing, and adds a `cmeg2fif` command that takes the same options as `python cMEG2fif.py`:
+This installs `numpy`, `pandas`, `mne` and `tzdata` if they're missing, and adds a `cmeg2fif` command that takes the same options as `python cMEG2fif.py`:
 
 ```
 cmeg2fif --version
@@ -60,10 +60,10 @@ The install also includes a copy of `cMEG_peripherals.tsv`, used when `--periphe
 Download `cMEG2fif.py` (and `cMEG_peripherals.tsv`) and run it with Python. Install the requirements first:
 
 ```
-pip install numpy pandas mne pyvista pyvistaqt pyqt6
+pip install numpy pandas mne tzdata pyvista pyvistaqt pyqt6
 ```
 
-- **For conversion:** `numpy`, `pandas` and `mne` (mne brings `scipy` and `matplotlib`).
+- **For conversion:** `numpy`, `pandas` and `mne` (mne brings `scipy` and `matplotlib`), plus `tzdata` for the time-zone database used to set the recording date (built into macOS and Linux, needed on Windows).
 - **For the 3D plot only:** `pyvista`, `pyvistaqt` and a Qt binding (`pyqt6`, `pyqt5` or `pyside6`). The plot appears when `--dig` is used. Without these packages, add `--no-plot`.
 - **With conda:** `conda install -c conda-forge mne` installs everything, including the plotting packages.
 
@@ -121,6 +121,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 | `--force` | off | Overwrite an existing FIF, its split parts and its log |
 | `--double` | off (float32) | Store data as float64. Doubles file size; float32 rounding (~6×10⁻⁸ of each value) is far below OPM sensor noise, so use this only for bit-exact archiving or pipeline comparisons ([details](#how-the-meg-values-are-stored)). |
 | `--line-freq HZ` | `60` | Mains frequency (the JSON value is ignored; Cerca writes 0) |
+| `--timezone TZ` | `America/New_York` | Time zone of the acquisition PC clock, used to turn the file-name timestamp into the recording date ([details](#recording-date)) |
 | `--min-samples N` | `3` | Shortest code kept in `STI101`/`STI_BTN`, in samples |
 | `--max-hsp N` | `0` (all) | Keep a random subset of at most N head-shape points. Uses a fixed seed (same points every run) and always keeps the fiducials. Useful for dense mesh-derived head shapes (~50k points), which slow plotting and MRI coregistration. |
 | `--no-plot` | off | Skip the 3D sensor/head alignment plot |
@@ -141,7 +142,27 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
     Output:   single precision (float32, default)
   ```
 
-  The log also records the input parts, the peripherals file used, detected trigger and button levels, the channel summary, the recording comment, bad channels and the files written.
+  The log also records the input parts, the recording start time, the peripherals file used, detected trigger and button levels, the channel summary, the recording comment, bad channels and the files written.
+
+### Recording date
+
+Cerca stores no date or time inside the recording. The only record is the file-name prefix, which is when the recording **started**, in local time on the acquisition PC:
+
+```
+20260929_134022_meg_001.cMEG   ->   started 2026-09-29 13:40:22 (local time)
+```
+
+The converter reads that prefix, converts it to UTC using `--timezone`, and stores it as the FIF's recording date (`meas_date`). Daylight saving is handled automatically: a September recording in `America/New_York` is UTC−4, a January one UTC−5. The log shows both times:
+
+```
+Recording start (from the file name, America/New_York): 2026-09-29 13:40:22 EDT = 2026-09-29 17:40:22 UTC
+```
+
+- **Why it matters:** MNE and MNE-BIDS use `meas_date` for the `acq_time` column in `scans.tsv`, for date-shifting when anonymising, and for matching empty-room recordings by date. Without it, those are blank or fail.
+- **Other sites:** set `--timezone` to the time zone the acquisition PC's clock is set to, as an IANA name (e.g. `Europe/London`, `America/Chicago`). The default is the Scully Center's `America/New_York`.
+- **Unusual file names:** if the prefix isn't a `YYYYMMDD_HHMMSS` timestamp (for example, a renamed file), the FIF is saved without a recording date and the log shows a warning.
+- **Clock accuracy:** the date is only as correct as the acquisition PC's clock. Keep it synchronised to network time.
+- **Converting on another computer:** the result doesn't depend on the converting computer's own clock or time zone (a cluster set to UTC gives the same answer), only on `--timezone`.
 
 ### Channels in the FIF
 
@@ -319,6 +340,8 @@ In practice:
 | `JSON RecordingDuration=... but data contains ...` | The data read doesn't match the recorded duration. Check for missing or truncated parts. |
 | `... unused (swing ... V)` on a trigger or button | That line never changed during the recording. This is expected for unused bits or buttons, but not for lines your paradigm uses. |
 | `Peripherals file lists "...", which is not in channels.tsv` | A name in the peripherals file doesn't match a BNC channel. Check the spelling. |
+| `--timezone: unknown time zone "..."` | The name isn't a valid IANA time zone. Use a name such as `America/New_York`. On Windows, also run `pip install tzdata`. |
+| `File-name prefix "..." is not a YYYYMMDD_HHMMSS timestamp` | The file was renamed, so the recording start can't be read from its name. The FIF is saved without a recording date. |
 
 ## Credits
 
