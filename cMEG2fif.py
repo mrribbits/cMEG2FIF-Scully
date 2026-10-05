@@ -54,6 +54,10 @@ Sidecars (same folder, shared <prefix>)
     <prefix>_meg.json            SamplingFrequency, RecordingDuration, ...
     <prefix>_channels.tsv        name, type, gain (V/nT), status
     <prefix>_HelmConfig.tsv      Sensor, Name, Px Py Pz, Ox Oy Oz
+    <prefix>_SessionInfo.txt     optional: start time (UTC), Operator ->
+                                 experimenter, Comments -> description, and
+                                 checks of OPM V/nT, Room Degaussed and
+                                 Experiment Type; all fields are logged
     --xfm FILE                   4x4 device->digitisation transform
                                  (default <prefix>_SensorTransform.tsv;
                                  needed only with digitisation)
@@ -68,12 +72,17 @@ Reading the first file with mne.io.read_raw_fif loads all of them.
 
 Recording date
 --------------
-Cerca stores no date inside the recording; the file-name prefix
-(YYYYMMDD_HHMMSS) is when the recording started, in local time on the
-acquisition PC. It is converted to UTC with --timezone (daylight saving is
-handled) and stored as the FIF's meas_date, which MNE-BIDS uses for
-scans.tsv acq_time and for anonymisation. A prefix that isn't a timestamp
-leaves meas_date unset, with a warning.
+Cerca stores no date inside the .cMEG data. The recording start is taken
+from, in order of preference:
+  1. <prefix>_SessionInfo.txt, line "recording started DD/MM/YYYY -
+     HH:MM:SS", already in UTC. Parsed explicitly as day/month/year.
+  2. The file-name prefix YYYYMMDD_HHMMSS, local time on the acquisition PC,
+     converted to UTC with --timezone (daylight saving handled).
+When both are available they are compared; if they differ by more than
+5 s, a warning is logged (a renamed file, a wrong --timezone, or a
+mis-set PC clock). The result is stored as the FIF's meas_date, which
+MNE-BIDS uses for scans.tsv acq_time and for anonymisation. With neither
+source, meas_date is left unset, with a warning.
 
 Trigger, button and auxiliary channels
 --------------------------------------
@@ -183,8 +192,10 @@ Output
 Processing
     --line-freq HZ      mains frequency (default 60; JSON value is ignored)
     --timezone TZ       time zone of the acquisition PC clock, used to turn
-                        the file-name timestamp into the recording date
-                        (IANA name; default America/New_York)
+                        the file-name timestamp into UTC (IANA name; default
+                        America/New_York). Used for the recording date only
+                        when SessionInfo.txt has none, and otherwise to
+                        cross-check it.
     --min-samples N     shortest code kept in STI101/STI_BTN, in samples
                         (default 3)
     --max-hsp N         keep a random subset of at most N head-shape points
@@ -225,8 +236,15 @@ Channels and sensors
   - channels.tsv status 'bad' -> info['bads'].
 Metadata
   - line_freq defaults to 60 Hz (Cerca writes PowerLineFrequency as 0).
-  - TaskDescription -> info['description'].
+  - TaskDescription (and SessionInfo Comments) copied into
+    info['description'] (the source files are unchanged).
   - meas_date set from the file-name timestamp, using --timezone (v2.12).
+  - meas_date taken from SessionInfo.txt (UTC) when present, with the file
+    name as fallback and a warning when they disagree; SessionInfo fields
+    are logged and its OPM V/nT is checked against channels.tsv (v2.13).
+  - SessionInfo Operator -> info['experimenter']; its Comments are appended
+    to info['description']; warnings for "Room Degaussed: No" and for a
+    recording type that doesn't match the use of --dig (v2.13).
   - Checks: data channels vs channels.tsv rows, JSON sampling rate vs time
     vector, JSON RecordingDuration vs samples read, mm-vs-m units.
 Digitisation
@@ -261,7 +279,7 @@ import sys
 import warnings
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-__version__ = '2.12'
+__version__ = '2.13'
 
 
 class _Tee:
@@ -321,6 +339,12 @@ MAP_NAME = 'cMEG_peripherals.tsv'
 MIN_SWING = 0.5     # V; smaller swings mean the line is unused
 PREFIX_TIME_RE = re.compile(r'^(\d{8}_\d{6})$')  # Cerca: YYYYMMDD_HHMMSS
 DEFAULT_TZ = 'America/New_York'   # Scully Center acquisition PC
+# SessionInfo.txt: "MEG Data, recording started 29/09/2026 - 17:40:22" (UTC,
+# day/month/year). Parsed explicitly so early-month dates can't swap.
+SESSION_TIME_RE = re.compile(
+    r'recording started\s+(\d{1,2})/(\d{1,2})/(\d{4})\s*-\s*'
+    r'(\d{1,2}):(\d{2}):(\d{2})', re.I)
+DATE_TOLERANCE_S = 5   # allowed SessionInfo vs file-name difference
 
 
 # --------------------------------------------------------------------------
@@ -530,6 +554,35 @@ def start_time_from_prefix(prefix, tz_name):
     return local.astimezone(datetime.timezone.utc), local
 
 
+def read_session_info(path):
+    """Read Cerca's <prefix>_SessionInfo.txt.
+
+    Returns (fields, start_utc, problem): the 'Key: value' lines as a dict,
+    the recording start as a UTC datetime (or None), and a description of
+    why the start couldn't be read (or None).
+    """
+    with open(path, encoding='utf-8-sig', errors='replace') as f:
+        text = f.read()
+    fields = {}
+    for line in text.splitlines():
+        if SESSION_TIME_RE.search(line) or ':' not in line:
+            continue
+        key, value = line.split(':', 1)
+        if key.strip():
+            fields[key.strip()] = value.strip()
+    m = SESSION_TIME_RE.search(text)
+    if not m:
+        return fields, None, ('no "recording started DD/MM/YYYY - HH:MM:SS" '
+                              'line')
+    day, month, year, hh, mm, ss = (int(g) for g in m.groups())
+    try:
+        start = datetime.datetime(year, month, day, hh, mm, ss,
+                                  tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return fields, None, f'invalid date/time in "{m.group(0)}"'
+    return fields, start, None
+
+
 def _require(paths):
     missing = [p for p in paths if not os.path.isfile(p)]
     if missing:
@@ -582,8 +635,9 @@ def main():
                    help='mains frequency (default 60; JSON value ignored)')
     g.add_argument('--timezone', metavar='TZ', default=DEFAULT_TZ,
                    help='time zone of the acquisition PC clock, used to turn '
-                        'the file-name timestamp into the recording date '
-                        f'(IANA name; default {DEFAULT_TZ})')
+                        'the file-name timestamp into UTC: the recording date '
+                        'when SessionInfo.txt has none, otherwise a '
+                        f'cross-check (IANA name; default {DEFAULT_TZ})')
     g.add_argument('--min-samples', metavar='N', type=int, default=3,
                    help='shortest code kept in STI101/STI_BTN (default 3)')
     g.add_argument('--max-hsp', metavar='N', type=int, default=0,
@@ -630,15 +684,60 @@ def main():
     _Tee.open(log_path)
     print(f'Log: {log_path}')
     print(f'Input parts: {", ".join(os.path.basename(p) for p in parts)}')
-    meas_utc, meas_local = start_time_from_prefix(prefix, args.timezone)
-    if meas_utc is not None:
-        print(f'Recording start (from the file name, {args.timezone}): '
-              f'{meas_local:%Y-%m-%d %H:%M:%S %Z} = '
-              f'{meas_utc:%Y-%m-%d %H:%M:%S} UTC')
+    # ---------------- Recording start ----------------
+    session_path = prefix + '_SessionInfo.txt'
+    sess_fields, sess_utc = {}, None
+    if os.path.isfile(session_path):
+        sess_fields, sess_utc, problem = read_session_info(session_path)
+        print(f'Session info: {os.path.basename(session_path)}')
+        for key, value in sess_fields.items():
+            print(f'    {key}: {value}')
+        if problem:
+            warnings.warn(f'{os.path.basename(session_path)}: {problem}; '
+                          f'using the file name for the recording date.')
     else:
-        warnings.warn(f'File-name prefix "{os.path.basename(prefix)}" is not '
-                      f'a YYYYMMDD_HHMMSS timestamp; the FIF gets no '
-                      f'recording date (meas_date).')
+        print(f'No {os.path.basename(session_path)} found; using the file '
+              f'name for the recording date.')
+    file_utc, file_local = start_time_from_prefix(prefix, args.timezone)
+    if sess_utc is not None:
+        print(f'Recording start (from SessionInfo, UTC): '
+              f'{sess_utc:%Y-%m-%d %H:%M:%S} UTC')
+    if file_utc is not None:
+        print(f'Recording start (from the file name, {args.timezone}): '
+              f'{file_local:%Y-%m-%d %H:%M:%S %Z} = '
+              f'{file_utc:%Y-%m-%d %H:%M:%S} UTC')
+    else:
+        warnings.warn(
+            f'File-name prefix "{os.path.basename(prefix)}" is not a '
+            f'YYYYMMDD_HHMMSS timestamp (renamed file?), so '
+            + ('the SessionInfo time cannot be cross-checked.'
+               if sess_utc is not None else
+               'the FIF gets no recording date (meas_date).'))
+    if sess_utc is not None and file_utc is not None:
+        diff = (file_utc - sess_utc).total_seconds()
+        if abs(diff) <= DATE_TOLERANCE_S:
+            print('  File name and SessionInfo agree.')
+        else:
+            rem = abs(diff) % 3600
+            whole_hours = abs(diff) >= 3600 - DATE_TOLERANCE_S and (
+                rem <= DATE_TOLERANCE_S or rem >= 3600 - DATE_TOLERANCE_S)
+            hint = (f'They differ by a whole number of hours, which usually '
+                    f'means --timezone ({args.timezone}) is not the time zone '
+                    f'of the acquisition PC clock, or that clock\'s time zone '
+                    f'or daylight-saving setting is wrong.' if whole_hours else
+                    'The file may have been renamed, or the acquisition PC '
+                    'clock was changed.')
+            warnings.warn(
+                f'Recording start disagrees: SessionInfo says '
+                f'{sess_utc:%Y-%m-%d %H:%M:%S} UTC, the file name says '
+                f'{file_utc:%Y-%m-%d %H:%M:%S} UTC ({diff:+.0f} s). {hint} '
+                f'Using SessionInfo.')
+    if sess_utc is not None:
+        meas_utc, meas_source = sess_utc, 'SessionInfo'
+    elif file_utc is not None:
+        meas_utc, meas_source = file_utc, 'file name'
+    else:
+        meas_utc, meas_source = None, None
     if args.dig and not os.path.isfile(args.dig):
         sys.exit(f'--dig file not found: {args.dig}')
     use_dig = os.path.isfile(dig_path)
@@ -653,6 +752,40 @@ def main():
     with open(json_path) as f:
         meta = json.load(f)
     sfreq = float(meta['SamplingFrequency'])
+
+    # ---------------- Session checks ----------------
+    degaussed = sess_fields.get('Room Degaussed', '').strip()
+    if degaussed.lower().startswith('no'):
+        warnings.warn(f'SessionInfo says "Room Degaussed: {degaussed}". '
+                      f'Expect higher residual fields and low-frequency '
+                      f'noise.')
+    json_type = str(meta.get('RecordingType', '')).strip()
+    sess_type = sess_fields.get('Experiment Type', '').strip()
+    kinds = {}
+    for src, val in (('JSON RecordingType', json_type),
+                     ('SessionInfo Experiment Type', sess_type)):
+        v = val.lower()
+        if 'noise' in v or 'empty' in v:
+            kinds[src] = ('empty room', val)
+        elif 'measurement' in v:
+            kinds[src] = ('subject', val)
+    if len({k for k, _ in kinds.values()}) > 1:
+        warnings.warn('Recording type disagrees: '
+                      + ', '.join(f'{s} "{v}"' for s, (_, v) in kinds.items())
+                      + '.')
+    elif kinds:
+        kind = next(iter(kinds.values()))[0]
+        label = ', '.join(f'{s} "{v}"' for s, (_, v) in kinds.items())
+        print(f'Recording type: {kind} ({label})')
+        if kind == 'empty room' and use_dig:
+            warnings.warn('This is an empty-room recording but digitisation '
+                          'is being added. Empty-room FIFs normally carry no '
+                          'head coregistration; leave out --xfm/--dig unless '
+                          'this is intended.')
+        elif kind == 'subject' and not use_dig:
+            warnings.warn('This is a subject recording but no digitisation '
+                          'was given, so the FIF has no head coregistration. '
+                          'Add --xfm and --dig unless this is intended.')
 
     channels = pd.read_csv(chan_path, sep='\t')
     channels.columns = channels.columns.str.strip()
@@ -773,6 +906,20 @@ def main():
                           f'contains {got:.1f}s.')
 
     gain = pd.to_numeric(channels[gain_col], errors='coerce').to_numpy(float)
+    try:
+        sess_gain = float(sess_fields.get('OPM V/nT', ''))
+    except ValueError:
+        sess_gain = None
+    if sess_gain is not None and np.isfinite(sess_gain) and sess_gain > 0:
+        meg_gain = gain[[t == 'MEGMAG' for t in types]]
+        off = np.abs(meg_gain - sess_gain) > 0.01 * sess_gain
+        if off.any():
+            warnings.warn(f'{int(off.sum())} MEG channel gain(s) in '
+                          f'channels.tsv differ from SessionInfo "OPM V/nT: '
+                          f'{sess_gain:g}" (channels.tsv values used: '
+                          f'{", ".join(f"{v:g}" for v in sorted(set(meg_gain[off])))}).')
+        else:
+            print(f'  MEG gains match SessionInfo OPM V/nT ({sess_gain:g}).')
 
     # ---------------- Sensor geometry ----------------
     print('Matching sensors to HelmConfig')
@@ -836,13 +983,27 @@ def main():
     info = mne.create_info(ch_names=names, sfreq=sfreq, ch_types=ch_types)
     info['line_freq'] = args.line_freq
     info['device_info'] = {'type': 'Cerca', 'model': 'cMEG'}
+    notes = []
     desc = str(meta.get('TaskDescription', '')).strip()
     if desc and desc.lower() != 'n/a':
-        info['description'] = desc
+        notes.append(desc)
         print(f'  Recording comment (JSON TaskDescription): "{desc}"')
-        print("    -> stored in the FIF as info['description']")
+    sess_comment = sess_fields.get('Comments', '').strip()
+    if sess_comment and sess_comment.lower() != 'n/a' \
+            and sess_comment not in notes:
+        notes.append(sess_comment)
+        print(f'  Recording comment (SessionInfo Comments): "{sess_comment}"')
+    if notes:
+        info['description'] = ' | '.join(notes)
+        print("    -> stored in the FIF as info['description']: "
+              f'"{info["description"]}"')
     else:
-        print('  No recording comment (JSON TaskDescription is empty)')
+        print('  No recording comment (JSON TaskDescription and SessionInfo '
+              'Comments are empty)')
+    operator = sess_fields.get('Operator', '').strip()
+    if operator and operator.lower() != 'n/a':
+        info['experimenter'] = operator
+        print(f"  Operator (SessionInfo) -> info['experimenter']: {operator}")
 
     nmeg = nref = nstim = 0
     for i, ct in enumerate(ch_types):
@@ -938,7 +1099,8 @@ def main():
     del buf, data, t
     if meas_utc is not None:
         raw.set_meas_date(meas_utc)
-        print(f'  Recording date (meas_date): {meas_utc:%Y-%m-%d %H:%M:%S} UTC')
+        print(f'  Recording date (meas_date, from {meas_source}): '
+              f'{meas_utc:%Y-%m-%d %H:%M:%S} UTC')
     dropped = [names[i] for i in range(n_ch) if role[i] == 'drop']
     if dropped:
         raw.drop_channels(dropped)

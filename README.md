@@ -77,6 +77,7 @@ Cerca's acquisition software writes these next to each other, sharing a prefix s
 | `<prefix>_meg.json` | Sampling rate, duration, recording comment |
 | `<prefix>_channels.tsv` | Channel names, types, gains (V/nT), good/bad status |
 | `<prefix>_HelmConfig.tsv` | Sensor positions and orientations in the helmet |
+| `<prefix>_SessionInfo.txt` | Recording start time (UTC), operator, OPM gain and session notes. Optional, but it's the preferred source for the recording date ([what's used](#sessioninfotxt)). |
 
 For subject recordings with head coregistration you also need these files:
 
@@ -121,7 +122,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 | `--force` | off | Overwrite an existing FIF, its split parts and its log |
 | `--double` | off (float32) | Store data as float64. Doubles file size; float32 rounding (~6×10⁻⁸ of each value) is far below OPM sensor noise, so use this only for bit-exact archiving or pipeline comparisons ([details](#how-the-meg-values-are-stored)). |
 | `--line-freq HZ` | `60` | Mains frequency (the JSON value is ignored; Cerca writes 0) |
-| `--timezone TZ` | `America/New_York` | Time zone of the acquisition PC clock, used to turn the file-name timestamp into the recording date ([details](#recording-date)) |
+| `--timezone TZ` | `America/New_York` | Time zone of the acquisition PC clock, used to convert the file-name timestamp to UTC. That becomes the recording date only when `SessionInfo.txt` has none; otherwise it's a cross-check ([details](#recording-date)). |
 | `--min-samples N` | `3` | Shortest code kept in `STI101`/`STI_BTN`, in samples |
 | `--max-hsp N` | `0` (all) | Keep a random subset of at most N head-shape points. Uses a fixed seed (same points every run) and always keeps the fiducials. Useful for dense mesh-derived head shapes (~50k points), which slow plotting and MRI coregistration. |
 | `--no-plot` | off | Skip the 3D sensor/head alignment plot |
@@ -133,7 +134,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 - **`<prefix>_meg_conversion_log.txt`**: everything printed during conversion, beginning with a provenance header like this:
 
   ```
-  cMEG2fif version 2.10
+  cMEG2fif version 2.13
     Run:      2026-09-28 16:23:13 EDT
     Command:  cMEG2fif.py 20260924_113141_meg_001.cMEG --xfm ... --dig ...
     Script:   C:\...\cMEG2fif.py
@@ -142,27 +143,85 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
     Output:   single precision (float32, default)
   ```
 
-  The log also records the input parts, the recording start time, the peripherals file used, detected trigger and button levels, the channel summary, the recording comment, bad channels and the files written.
+  The log also records the input parts, the `SessionInfo.txt` fields, the recording start time from each source, the recording type, the peripherals file used, detected trigger and button levels, the channel summary, the recording comment, bad channels and the files written.
 
 ### Recording date
 
-Cerca stores no date or time inside the recording. The only record is the file-name prefix, which is when the recording **started**, in local time on the acquisition PC:
+Cerca doesn't store the date inside the `.cMEG` data. The converter takes the recording start time from two places, in this order:
+
+1. **`<prefix>_SessionInfo.txt`** (preferred). Its first line gives the start time, already in UTC:
+
+   ```
+   MEG Data, recording started 29/09/2026 - 17:40:22
+   ```
+
+   The date is **day/month/year**. It's parsed explicitly in that order, so an early-month date like `03/10/2026` is always 3 October, never 10 March.
+
+2. **The file-name prefix** (fallback). It's the start time in local time on the acquisition PC, converted to UTC with `--timezone`. Daylight saving is handled: a September recording in `America/New_York` is UTC−4, a January one UTC−5.
+
+   ```
+   20260929_134022_meg_001.cMEG   ->   2026-09-29 13:40:22 EDT = 17:40:22 UTC
+   ```
+
+The result is stored as the FIF's recording date (`meas_date`). When both sources are available, the converter compares them and logs both:
 
 ```
-20260929_134022_meg_001.cMEG   ->   started 2026-09-29 13:40:22 (local time)
-```
-
-The converter reads that prefix, converts it to UTC using `--timezone`, and stores it as the FIF's recording date (`meas_date`). Daylight saving is handled automatically: a September recording in `America/New_York` is UTC−4, a January one UTC−5. The log shows both times:
-
-```
+Recording start (from SessionInfo, UTC): 2026-09-29 17:40:22 UTC
 Recording start (from the file name, America/New_York): 2026-09-29 13:40:22 EDT = 2026-09-29 17:40:22 UTC
+  File name and SessionInfo agree.
 ```
+
+If they differ by more than 5 seconds, a warning is logged and the `SessionInfo.txt` time is used:
+
+- **A whole number of hours apart:** usually `--timezone` doesn't match the acquisition PC's time zone, or the PC's time zone or daylight-saving setting is wrong.
+- **Any other difference:** usually the file was renamed (the prefix is no longer the original timestamp), or the PC clock was changed.
+
+Other details:
 
 - **Why it matters:** MNE and MNE-BIDS use `meas_date` for the `acq_time` column in `scans.tsv`, for date-shifting when anonymising, and for matching empty-room recordings by date. Without it, those are blank or fail.
+- **Renamed files:** a renamed file still gets the correct date from `SessionInfo.txt`, as long as it was renamed together with the recording (same prefix). The log notes that the file name couldn't be used as a cross-check.
+- **Missing or unreadable `SessionInfo.txt`:** the file-name time is used. If that isn't a `YYYYMMDD_HHMMSS` timestamp either, the FIF is saved without a recording date, with a warning.
 - **Other sites:** set `--timezone` to the time zone the acquisition PC's clock is set to, as an IANA name (e.g. `Europe/London`, `America/Chicago`). The default is the Scully Center's `America/New_York`.
-- **Unusual file names:** if the prefix isn't a `YYYYMMDD_HHMMSS` timestamp (for example, a renamed file), the FIF is saved without a recording date and the log shows a warning.
-- **Clock accuracy:** the date is only as correct as the acquisition PC's clock. Keep it synchronised to network time.
-- **Converting on another computer:** the result doesn't depend on the converting computer's own clock or time zone (a cluster set to UTC gives the same answer), only on `--timezone`.
+- **Clock accuracy:** both sources come from the acquisition PC's clock, so the date is only as correct as that clock. Keep it synchronised to network time.
+- **Converting on another computer:** the result doesn't depend on the converting computer's own clock or time zone (a cluster set to UTC gives the same answer).
+
+### SessionInfo.txt
+
+Cerca writes `<prefix>_SessionInfo.txt` alongside each recording:
+
+```
+MEG Data, recording started 29/09/2026 - 17:40:22
+Operator: Pinsk
+Patient ID: 001
+Ethics Code: 16967
+Experiment Type: Measurement
+Room Degaussed: Yes
+Helmet: See TSV
+OPM V/nT: 2.70
+Comments:
+```
+
+Every field is written to the conversion log. The converter also uses them as follows:
+
+| Field | Use |
+|---|---|
+| `recording started` | Recording date (`meas_date`); see [Recording date](#recording-date) |
+| `Operator` | Stored as `raw.info['experimenter']` |
+| `Comments` | Appended to `raw.info['description']` |
+| `OPM V/nT` | Checked against the gains in `channels.tsv`, with a warning if they differ by more than 1% (the `channels.tsv` values are used) |
+| `Room Degaussed` | A warning if it says `No` |
+| `Experiment Type` | Checked against the JSON `RecordingType` and against how the file is being converted (see below) |
+| `Patient ID`, `Ethics Code` | Logged only; never written into the FIF |
+
+**Recording-type check.** `Experiment Type` (SessionInfo) and `RecordingType` (JSON) say whether the run is an empty-room recording (`Noise`) or a subject recording (`Measurement`). The converter warns when:
+
+- the two disagree;
+- an empty-room recording is given `--xfm`/`--dig` (empty-room FIFs normally have no head coregistration);
+- a subject recording has no `--dig` (the FIF would have no head coregistration).
+
+These are warnings only; the conversion still runs, since there can be good reasons for either.
+
+**Anonymising.** `raw.anonymize()` (and MNE-BIDS anonymisation) replaces `experimenter` and `description` as well as shifting the date. Operator names and free-text comments therefore don't leak into shared data.
 
 ### Channels in the FIF
 
@@ -175,7 +234,8 @@ Recording start (from the file name, America/New_York): 2026-09-29 13:40:22 EDT 
 
 Other details:
 - **Bad channels:** channels marked `bad` in `channels.tsv` are carried into `raw.info['bads']`.
-- **Recording comment:** the JSON `TaskDescription` becomes `raw.info['description']`.
+- **Recording comment:** the JSON `TaskDescription`, plus any `Comments:` from `SessionInfo.txt`, is copied into `raw.info['description']` (joined with ` | `), so the notes travel with the FIF. The source files are never changed.
+- **Operator:** the `SessionInfo.txt` operator is stored as `raw.info['experimenter']`.
 - **Line frequency:** `raw.info['line_freq']` is set to 60 Hz.
 
 A typical run summarises the channels like this:
@@ -341,7 +401,14 @@ In practice:
 | `... unused (swing ... V)` on a trigger or button | That line never changed during the recording. This is expected for unused bits or buttons, but not for lines your paradigm uses. |
 | `Peripherals file lists "...", which is not in channels.tsv` | A name in the peripherals file doesn't match a BNC channel. Check the spelling. |
 | `--timezone: unknown time zone "..."` | The name isn't a valid IANA time zone. Use a name such as `America/New_York`. On Windows, also run `pip install tzdata`. |
-| `File-name prefix "..." is not a YYYYMMDD_HHMMSS timestamp` | The file was renamed, so the recording start can't be read from its name. The FIF is saved without a recording date. |
+| `File-name prefix "..." is not a YYYYMMDD_HHMMSS timestamp` | The file was renamed, so its name can't give the start time. If `SessionInfo.txt` is present, its time is used without a cross-check; otherwise the FIF is saved without a recording date. |
+| `Recording start disagrees: SessionInfo says ..., the file name says ...` | The two sources differ by more than 5 s. A whole number of hours usually means a wrong `--timezone` or PC time-zone setting; anything else usually means a renamed file. The `SessionInfo.txt` time is used. |
+| `..._SessionInfo.txt: invalid date/time` or `no "recording started ..." line` | The start time in `SessionInfo.txt` couldn't be read. The file-name time is used instead. |
+| `SessionInfo says "Room Degaussed: No"` | The room wasn't degaussed before this recording. Expect higher residual fields and more low-frequency noise. |
+| `Recording type disagrees: JSON RecordingType ..., SessionInfo Experiment Type ...` | One file calls the run empty room (`Noise`) and the other subject (`Measurement`). Check which is right. |
+| `This is an empty-room recording but digitisation is being added` | `--xfm`/`--dig` were given for an empty-room run. Leave them out unless intended. |
+| `This is a subject recording but no digitisation was given` | The FIF will have no head coregistration. Add `--xfm` and `--dig` unless intended. |
+| `... MEG channel gain(s) in channels.tsv differ from SessionInfo "OPM V/nT: ..."` | The gain in `channels.tsv` doesn't match the one in `SessionInfo.txt`. The `channels.tsv` value is used; check which is correct for the sensors' gain setting. |
 
 ## Credits
 
