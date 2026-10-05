@@ -26,19 +26,26 @@ the plotting packages).
 
 Examples
 --------
-Windows command prompt shown; on macOS/Linux end continued lines with a
-backslash instead of ^.
+macOS/Linux shown; in the Windows command prompt end continued lines with ^
+instead of a backslash. <prefix>_SessionInfo.txt is found automatically;
+--session-info is only needed when it has a different name or location.
 
     # Empty-room recording
     python cMEG2fif.py 20260924_103257_meg_001.cMEG
 
     # Subject recording with head coregistration
-    python cMEG2fif.py 20260924_113141_meg_001.cMEG ^
-        --xfm subject003_headHelmet_dev2head_xfm.tsv ^
+    python cMEG2fif.py 20260924_113141_meg_001.cMEG \\
+        --xfm subject003_headHelmet_dev2head_xfm.tsv \\
+        --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz
+
+    # SessionInfo.txt kept elsewhere or renamed
+    python cMEG2fif.py 20260924_113141_meg_001.cMEG \\
+        --session-info ../session_notes/20260924_113141_SessionInfo.txt \\
+        --xfm subject003_headHelmet_dev2head_xfm.tsv \\
         --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz
 
     # Re-convert, replacing earlier output, without the 3D plot
-    python cMEG2fif.py 20260924_113141_meg_001.cMEG --xfm ... --dig ... ^
+    python cMEG2fif.py 20260924_113141_meg_001.cMEG --xfm ... --dig ... \\
         --force --no-plot
 
 Data files
@@ -54,7 +61,8 @@ Sidecars (same folder, shared <prefix>)
     <prefix>_meg.json            SamplingFrequency, RecordingDuration, ...
     <prefix>_channels.tsv        name, type, gain (V/nT), status
     <prefix>_HelmConfig.tsv      Sensor, Name, Px Py Pz, Ox Oy Oz
-    <prefix>_SessionInfo.txt     optional: start time (UTC), Operator ->
+    <prefix>_SessionInfo.txt     optional (or --session-info FILE): start
+                                 time (UTC), Operator ->
                                  experimenter, Comments -> description, and
                                  checks of OPM V/nT, Room Degaussed and
                                  Experiment Type; all fields are logged
@@ -179,6 +187,10 @@ Inputs
     --dig FILE          digitisation .xyz; last 3 rows NAS, LPA, RPA
                         (default <prefix>_digitisation.xyz; optional; leave
                         out for empty-room recordings)
+    --session-info FILE Cerca session file: recording start time (UTC),
+                        operator, comments, OPM gain and session checks
+                        (default <prefix>_SessionInfo.txt; optional; if
+                        missing, the file name gives the recording date)
     --peripherals FILE  BNC peripherals file (default cMEG_peripherals.tsv in
                         the data folder, else next to this script, else the
                         copy installed with the package)
@@ -242,6 +254,8 @@ Metadata
   - meas_date taken from SessionInfo.txt (UTC) when present, with the file
     name as fallback and a warning when they disagree; SessionInfo fields
     are logged and its OPM V/nT is checked against channels.tsv (v2.13).
+  - --session-info FILE to use a SessionInfo.txt with a different name or
+    location (v2.14).
   - SessionInfo Operator -> info['experimenter']; its Comments are appended
     to info['description']; warnings for "Room Degaussed: No" and for a
     recording type that doesn't match the use of --dig (v2.13).
@@ -279,7 +293,7 @@ import sys
 import warnings
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-__version__ = '2.13'
+__version__ = '2.14'
 
 
 class _Tee:
@@ -599,10 +613,10 @@ def main():
                     f'FIF (version {__version__}). See the top of this script '
                     f'for full documentation.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''examples (Windows command prompt; use \\ instead of ^ elsewhere):
+        epilog='''examples (macOS/Linux; in the Windows command prompt use ^ instead of \\):
   empty room:  %(prog)s 20260924_103257_meg_001.cMEG
-  subject:     %(prog)s 20260924_113141_meg_001.cMEG ^
-                   --xfm subject003_headHelmet_dev2head_xfm.tsv ^
+  subject:     %(prog)s 20260924_113141_meg_001.cMEG \\
+                   --xfm subject003_headHelmet_dev2head_xfm.tsv \\
                    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz
 ''')
     ap.add_argument('--version', action='version',
@@ -617,6 +631,10 @@ def main():
     g.add_argument('--dig', metavar='FILE',
                    help='digitisation .xyz, last 3 rows NAS/LPA/RPA (default '
                         '<prefix>_digitisation.xyz; omit for empty room)')
+    g.add_argument('--session-info', metavar='FILE',
+                   help='Cerca SessionInfo.txt: recording start (UTC), '
+                        'operator, comments, session checks (default '
+                        '<prefix>_SessionInfo.txt; optional)')
     g.add_argument('--peripherals', metavar='FILE',
                    help=f'BNC peripherals file (default {MAP_NAME} in the '
                         f'data folder, else next to this script, else the '
@@ -685,7 +703,9 @@ def main():
     print(f'Log: {log_path}')
     print(f'Input parts: {", ".join(os.path.basename(p) for p in parts)}')
     # ---------------- Recording start ----------------
-    session_path = prefix + '_SessionInfo.txt'
+    session_path = args.session_info or prefix + '_SessionInfo.txt'
+    if args.session_info and not os.path.isfile(session_path):
+        sys.exit(f'--session-info file not found: {session_path}')
     sess_fields, sess_utc = {}, None
     if os.path.isfile(session_path):
         sess_fields, sess_utc, problem = read_session_info(session_path)

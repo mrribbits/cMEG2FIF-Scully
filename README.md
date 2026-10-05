@@ -77,7 +77,7 @@ Cerca's acquisition software writes these next to each other, sharing a prefix s
 | `<prefix>_meg.json` | Sampling rate, duration, recording comment |
 | `<prefix>_channels.tsv` | Channel names, types, gains (V/nT), good/bad status |
 | `<prefix>_HelmConfig.tsv` | Sensor positions and orientations in the helmet |
-| `<prefix>_SessionInfo.txt` | Recording start time (UTC), operator, OPM gain and session notes. Optional, but it's the preferred source for the recording date ([what's used](#sessioninfotxt)). |
+| `<prefix>_SessionInfo.txt` | Recording start time (UTC), operator, OPM gain and session notes. Optional, but it's the preferred source for the recording date ([what's used](#sessioninfotxt)). Use `--session-info` if it has a different name or location. |
 
 For subject recordings with head coregistration you also need these files:
 
@@ -90,21 +90,30 @@ The unnumbered `<prefix>_meg.cMEG` is never used, because it may be an edited co
 
 ## Usage
 
-Examples use the Windows command prompt. On macOS/Linux, end continued lines with `\` instead of `^`.
+Examples are for macOS/Linux. In the Windows command prompt, end continued lines with `^` instead of `\`.
 
-```
-:: Empty-room recording (no coregistration)
+`<prefix>_SessionInfo.txt` is picked up automatically from the data folder, so `--session-info` is only needed when that file has a different name or location.
+
+```bash
+# Empty-room recording (no coregistration)
 python cMEG2fif.py 20260924_103257_meg_001.cMEG
 
-:: Subject recording with head coregistration
-python cMEG2fif.py 20260924_113141_meg_001.cMEG ^
-    --xfm subject003_headHelmet_dev2head_xfm.tsv ^
+# Subject recording with head coregistration
+# (20260924_113141_SessionInfo.txt in the same folder is used automatically)
+python cMEG2fif.py 20260924_113141_meg_001.cMEG \
+    --xfm subject003_headHelmet_dev2head_xfm.tsv \
     --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz
 
-:: Re-convert, replacing earlier output, without the 3D plot
-python cMEG2fif.py 20260924_113141_meg_001.cMEG ^
-    --xfm subject003_headHelmet_dev2head_xfm.tsv ^
-    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz ^
+# SessionInfo.txt kept in another folder or renamed
+python cMEG2fif.py 20260924_113141_meg_001.cMEG \
+    --session-info ../session_notes/20260924_113141_SessionInfo.txt \
+    --xfm subject003_headHelmet_dev2head_xfm.tsv \
+    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz
+
+# Re-convert, replacing earlier output, without the 3D plot
+python cMEG2fif.py 20260924_113141_meg_001.cMEG \
+    --xfm subject003_headHelmet_dev2head_xfm.tsv \
+    --dig subject003_headHelmet_digitisation_from_mesh_3_xfmd.xyz \
     --force --no-plot
 ```
 
@@ -117,6 +126,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 | `CMEG_FILE` | *required* | Any part of the recording (`<prefix>_meg_NNN.cMEG`) |
 | `--xfm FILE` | `<prefix>_SensorTransform.tsv` | 4×4 device→digitisation transform; used only with `--dig`. Omit for empty room. |
 | `--dig FILE` | `<prefix>_digitisation.xyz` | Head-shape points; last 3 rows NAS, LPA, RPA. Omit for empty room. |
+| `--session-info FILE` | `<prefix>_SessionInfo.txt` | Cerca session file: recording start time (UTC), operator, comments, OPM gain and session checks ([details](#sessioninfotxt)). Optional; without it, the file name gives the recording date. |
 | `--peripherals FILE` | `cMEG_peripherals.tsv` in the data folder, else next to the script, else the copy installed with pip | BNC peripherals definition |
 | `--out FILE` | `<prefix>_meg.fif` | Output FIF; the log is written next to it |
 | `--force` | off | Overwrite an existing FIF, its split parts and its log |
@@ -134,7 +144,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 - **`<prefix>_meg_conversion_log.txt`**: everything printed during conversion, beginning with a provenance header like this:
 
   ```
-  cMEG2fif version 2.13
+  cMEG2fif version 2.14
     Run:      2026-09-28 16:23:13 EDT
     Command:  cMEG2fif.py 20260924_113141_meg_001.cMEG --xfm ... --dig ...
     Script:   C:\...\cMEG2fif.py
@@ -187,7 +197,7 @@ Other details:
 
 ### SessionInfo.txt
 
-Cerca writes `<prefix>_SessionInfo.txt` alongside each recording:
+Cerca writes `<prefix>_SessionInfo.txt` alongside each recording. The converter finds it automatically; use `--session-info FILE` if it has been renamed or stored elsewhere.
 
 ```
 MEG Data, recording started 29/09/2026 - 17:40:22
@@ -400,6 +410,7 @@ In practice:
 | `JSON RecordingDuration=... but data contains ...` | The data read doesn't match the recorded duration. Check for missing or truncated parts. |
 | `... unused (swing ... V)` on a trigger or button | That line never changed during the recording. This is expected for unused bits or buttons, but not for lines your paradigm uses. |
 | `Peripherals file lists "...", which is not in channels.tsv` | A name in the peripherals file doesn't match a BNC channel. Check the spelling. |
+| `--session-info file not found: ...` | The file given with `--session-info` doesn't exist. Check the path. |
 | `--timezone: unknown time zone "..."` | The name isn't a valid IANA time zone. Use a name such as `America/New_York`. On Windows, also run `pip install tzdata`. |
 | `File-name prefix "..." is not a YYYYMMDD_HHMMSS timestamp` | The file was renamed, so its name can't give the start time. If `SessionInfo.txt` is present, its time is used without a cross-check; otherwise the FIF is saved without a recording date. |
 | `Recording start disagrees: SessionInfo says ..., the file name says ...` | The two sources differ by more than 5 s. A whole number of hours usually means a wrong `--timezone` or PC time-zone setting; anything else usually means a renamed file. The `SessionInfo.txt` time is used. |
