@@ -256,6 +256,8 @@ Metadata
     are logged and its OPM V/nT is checked against channels.tsv (v2.13).
   - --session-info FILE to use a SessionInfo.txt with a different name or
     location (v2.14).
+  - Misc (analog BNC) channels carry volts as their unit instead of none,
+    so BIDS channels.tsv lists V rather than n/a (v2.15).
   - SessionInfo Operator -> info['experimenter']; its Comments are appended
     to info['description']; warnings for "Room Degaussed: No" and for a
     recording type that doesn't match the use of --dig (v2.13).
@@ -293,7 +295,7 @@ import sys
 import warnings
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-__version__ = '2.14'
+__version__ = '2.15'
 
 
 class _Tee:
@@ -1048,6 +1050,9 @@ def main():
             nstim += 1
             ch.update(logno=nstim, coord_frame=FIFF.FIFFV_COORD_UNKNOWN,
                       kind=FIFF.FIFFV_STIM_CH, unit=FIFF.FIFF_UNIT_V, cal=1.0)
+        elif ct == 'misc':
+            # BNC analog inputs (eye tracker etc.) are recorded in volts
+            ch.update(unit=FIFF.FIFF_UNIT_V, cal=1.0)
     def _n(k, what):
         return f'{k} {what}' + ('' if k == 1 else 's')
     def _and(items):

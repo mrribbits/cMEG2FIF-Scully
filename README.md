@@ -144,7 +144,7 @@ Run `python cMEG2fif.py -h` for the option list, or `python cMEG2fif.py --versio
 - **`<prefix>_meg_conversion_log.txt`**: everything printed during conversion, beginning with a provenance header like this:
 
   ```
-  cMEG2fif version 2.14
+  cMEG2fif version 2.15
     Run:      2026-09-28 16:23:13 EDT
     Command:  cMEG2fif.py 20260924_113141_meg_001.cMEG --xfm ... --dig ...
     Script:   C:\...\cMEG2fif.py
@@ -240,7 +240,7 @@ These are warnings only; the conversion still runs, since there can be good reas
 | `mag` | Every on-head OPM sensor axis, with position and orientation |
 | `ref_meg` | Sensors listed in `channels.tsv` with no helmet slot (e.g. off-head references) |
 | `stim` | The 8 VPixx trigger lines, **`STI101`**, button channels and **`STI_BTN`** |
-| `misc` | Analog BNC peripherals (e.g. eye tracker) and any undefined BNC input |
+| `misc` | Analog BNC peripherals (e.g. eye tracker) and any undefined BNC input, stored in volts as recorded |
 
 Other details:
 - **Bad channels:** channels marked `bad` in `channels.tsv` are carried into `raw.info['bads']`.
@@ -253,7 +253,7 @@ A typical run summarises the channels like this:
 ```
 192 MEG channels, 6 reference channels, 20 stim channels (incl. 8 VPixx trigger
 channels, STI101, 10 BNC button channels, and STI_BTN), 6 misc channels (incl.
-eye_x, eye_y, and eye_z)
+eye_x, eye_y, and eye_pupil)
 ```
 
 ## Triggers, buttons and peripherals
@@ -297,7 +297,7 @@ The facility file defines these inputs:
 |---|---|---|---|
 | 1–5 | `R_thumb`, `R_index`, `R_middle`, `R_ring`, `R_pinky` | button | 1, 2, 4, 8, 16 |
 | 6–10 | `L_thumb`, `L_index`, `L_middle`, `L_ring`, `L_pinky` | button | 32, 64, 128, 256, 512 |
-| 11–13 | `eye_x`, `eye_y`, `eye_z` | misc | none |
+| 11–13 | `eye_x`, `eye_y`, `eye_pupil` | misc | none |
 | 14–16 | *(undefined)* | misc | none |
 
 To use a different setup for one study, copy the file, edit it, and pass it with `--peripherals`.
