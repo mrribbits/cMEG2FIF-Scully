@@ -424,3 +424,8 @@ In practice:
 ## Credits
 
 Original `cMEG2fif` conversion script: Molly Rea, 2023. The script's docstring lists all changes since v2.1.
+
+
+## Flowchart
+
+![cMEG2fif inputs and outputs](docs/cMEG2fif_inputs.png)
