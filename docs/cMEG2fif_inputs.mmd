@@ -1,0 +1,59 @@
+%%{init: {"fontFamily": "arial, helvetica, sans-serif", "flowchart": {"wrappingWidth": 600, "padding": 34, "nodeSpacing": 30, "rankSpacing": 70, "htmlLabels": true}, "themeVariables": {"fontFamily": "arial, helvetica, sans-serif", "clusterBkg": "#fafafa", "clusterBorder": "#bbbbbb", "fontSize": "15px"}, "themeCSS": ".node .nodeLabel, .node foreignObject div { text-align: left !important; white-space: nowrap !important; } foreignObject { overflow: visible; } .cluster-label .nodeLabel { font-weight: bold; }"}}%%
+flowchart LR
+    subgraph CERCA["Files written by the Cerca acquisition software (same folder, shared prefix)"]
+        direction TB
+        CMEG["<b>&lt;prefix&gt;_meg_001.cMEG</b> (+ _002, …)<br/>• signal samples → raw data, read with raw.get_data()<br/>   (MEG converted V→T; trigger and BNC lines kept in V)<br/>• time row → check: sampling rate, gaps between parts"]
+        JSON["<b>&lt;prefix&gt;_meg.json</b><br/>• SamplingFrequency → info['sfreq']<br/>• TaskDescription → info['description']<br/>• RecordingDuration → check: data length<br/>• RecordingType → check: empty room vs subject<br/>• PowerLineFrequency → ignored (Cerca writes 0)"]
+        CHAN["<b>&lt;prefix&gt;_channels.tsv</b><br/>• name → info['ch_names'], info['chs'][i]['ch_name']<br/>• type (MEGMAG / TRIG / MISC) → info['chs'][i]['kind']<br/>• gain V0x2FnT (V/nT) → V→T scaling of the data<br/>• status = bad → info['bads']"]
+        HELM["<b>&lt;prefix&gt;_HelmConfig.tsv</b><br/>• Sensor → matched to channel name<br/>• Px Py Pz → info['chs'][i]['loc'][0:3] (position)<br/>• Ox Oy Oz → info['chs'][i]['loc'][9:12] (sensing direction;<br/>   loc[3:9] = the two perpendicular axes)<br/>• channel with no helmet slot → kind = FIFFV_REF_MEG_CH<br/>• helmet name → log"]
+        SESS["<b>&lt;prefix&gt;_SessionInfo.txt</b> (or --session-info)<br/>• recording started (UTC) → info['meas_date']<br/>• Operator → info['experimenter']<br/>• Comments → info['description']<br/>• OPM V/nT → check: gains in channels.tsv<br/>• Room Degaussed, Experiment Type → checks<br/>• Patient ID, Ethics Code → log only"]
+        NAME["<b>File-name prefix</b> YYYYMMDD_HHMMSS<br/>• local start time → info['meas_date']<br/>   (fallback, and cross-check of SessionInfo)"]
+    end
+
+    subgraph COREG["Coregistration files (subject runs only)"]
+        direction TB
+        XFM["<b>--xfm</b> e.g. *_dev2head_xfm.tsv<br/>• 4×4 device → digitisation transform<br/>   → info['dev_head_t']['trans'] (with the fiducials)"]
+        DIG["<b>--dig</b> e.g. *_digitisation.xyz<br/>• NAS, LPA, RPA → info['dig'] (kind = cardinal);<br/>   define the head frame for info['dev_head_t']<br/>• head-shape points → info['dig'] (kind = extra)"]
+    end
+
+    PERI["<b>cMEG_peripherals.tsv</b> (or --peripherals)<br/>• BNC type → info['chs'][i]['kind'] (stim / misc) or dropped<br/>• BNC name → info['ch_names'] (renamed)<br/>• button order → STI_BTN bit values"]
+
+    CLI["<b>Command-line options</b><br/>• --timezone → converts the file-name time to UTC<br/>• --line-freq → info['line_freq'] (default 60)<br/>• --min-samples → STI101 / STI_BTN glitch merging<br/>• --max-hsp → number of head-shape points in info['dig']<br/>• --double → float64 instead of float32 on disk<br/>• --out, --force → output name, overwrite<br/>• --no-plot → skip 3D alignment check"]
+
+    CONV(("<div style='text-align:center'><b>cMEG2fif</b></div>"))
+
+    subgraph OUT["Outputs"]
+        direction TB
+        DATA["<b>FIF data</b> — raw.get_data(picks=...)<br/>• MEG channels in tesla (picks='mag' / 'ref_meg')<br/>• Trigger1[Z] … Trigger8[Z] + combined STI101<br/>• R_thumb … L_pinky + combined STI_BTN (picks='stim')<br/>• eye_x, eye_y, eye_pupil, other BNC in volts (picks='misc')"]
+        INFO["<b>FIF info — from the inputs</b> (raw.info[...])<br/>• info['sfreq'] ← meg.json<br/>• info['ch_names'], info['chs'][i]['kind']<br/>   ← channels.tsv, peripherals<br/>• info['chs'][i]['loc'] ← HelmConfig<br/>• info['bads'] ← channels.tsv<br/>• info['meas_date'] ← SessionInfo (or file name + --timezone)<br/>• info['description'] ← meg.json + SessionInfo<br/>• info['experimenter'] ← SessionInfo<br/>• info['line_freq'] ← --line-freq<br/>• info['dig'] ← --dig<br/>• info['dev_head_t'] ← --xfm + fiducials"]
+        FIXED["<b>FIF info — not from the inputs</b> (raw.info[...])<br/><i>Set or corrected by cMEG2fif:</i><br/>• info['chs'][i]['coil_type'] = FIFFV_COIL_QUSPIN_ZFOPM_MAG2 (8002)<br/>• info['chs'][i]['unit'] = FIFF_UNIT_T (112) for MEG,<br/>   FIFF_UNIT_V (107) for trigger/BNC/misc<br/>• info['chs'][i]['cal'] = 1.0 (values stored in physical units)<br/>• info['chs'][i]['coord_frame'] = FIFFV_COORD_DEVICE for MEG<br/>• info['device_info'] = {'type': 'Cerca', 'model': 'cMEG'}<br/><i>Left at MNE defaults:</i><br/>• info['highpass'] = 0.0, info['lowpass'] = 600.0 (Nyquist)<br/>• empty, not applicable to OPM: info['hpi_meas'],<br/>   info['hpi_results'], info['hpi_subsystem'], info['comps'],<br/>   info['projs'], info['proc_history'], info['gantry_angle']<br/>• empty by design: info['subject_info'] (set in BIDS)"]
+        LOG["<b>&lt;prefix&gt;_meg_conversion_log.txt</b><br/>• provenance header (version, command, host, packages)<br/>• SessionInfo fields, both start times<br/>• trigger/button levels, channel summary<br/>• all checks and warnings"]
+    end
+
+    CMEG --> CONV
+    JSON --> CONV
+    CHAN --> CONV
+    HELM --> CONV
+    SESS --> CONV
+    NAME --> CONV
+    XFM --> CONV
+    DIG --> CONV
+    PERI --> CONV
+    CLI --> CONV
+    CONV --> DATA
+    CONV --> INFO
+    CONV --> FIXED
+    CONV --> LOG
+
+    classDef cerca fill:#e8f1fb,stroke:#3a6ea5,color:#111
+    classDef coreg fill:#eef7ee,stroke:#3f8a4a,color:#111
+    classDef facility fill:#fdf3e3,stroke:#b07a1e,color:#111
+    classDef cli fill:#f3eefa,stroke:#6c4ea0,color:#111
+    classDef out fill:#f4f4f4,stroke:#555,color:#111
+    classDef conv fill:#ffffff,stroke:#111,stroke-width:2px,color:#111
+    class CMEG,JSON,CHAN,HELM,SESS,NAME cerca
+    class XFM,DIG coreg
+    class PERI facility
+    class CLI cli
+    class DATA,INFO,FIXED,LOG out
+    class CONV conv
